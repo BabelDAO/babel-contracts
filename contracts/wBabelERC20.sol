@@ -745,7 +745,7 @@ interface IStaking {
     function index() external view returns ( uint );
 }
 
-contract wBabelERC20 is ERC20 {
+contract WBabelERC20 is ERC20 {
     using SafeERC20 for ERC20;
     using Address for address;
     using SafeMath for uint;

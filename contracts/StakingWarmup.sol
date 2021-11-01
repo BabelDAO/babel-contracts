@@ -74,7 +74,7 @@ interface IERC20 {
   event Approval(address indexed owner, address indexed spender, uint256 value);
 }
 
-contract StakingWarmup {
+contract BabelStakingWarmup {
 
     address public immutable staking;
     address public immutable sBABEL;

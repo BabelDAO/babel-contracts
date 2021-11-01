@@ -5,9 +5,9 @@ interface IOwnable {
   function policy() external view returns (address);
 
   function renounceManagement() external;
-  
+
   function pushManagement( address newOwner_ ) external;
-  
+
   function pullManagement() external;
 }
 
@@ -43,7 +43,7 @@ contract Ownable is IOwnable {
         emit OwnershipPushed( _owner, newOwner_ );
         _newOwner = newOwner_;
     }
-    
+
     function pullManagement() public virtual override {
         require( msg.sender == _newOwner, "Ownable: must be new owner to pull");
         emit OwnershipPulled( _owner, _newOwner );
@@ -56,7 +56,7 @@ interface IBond {
     function pendingPayoutFor( address _depositor ) external view returns ( uint pendingPayout_ );
 }
 
-contract RedeemHelper is Ownable {
+contract BabelRedeemHelper is Ownable {
 
     address[] public bonds;
 

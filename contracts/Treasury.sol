@@ -268,22 +268,10 @@ contract BabelTreasury is Ownable {
 
     constructor (
         address _BABEL,
-        address _DAI,
-        address _Frax,
-        address _BABELDAI,
         uint _blocksNeededForQueue
     ) {
         require( _BABEL != address(0) );
         BABEL = _BABEL;
-
-        isReserveToken[ _DAI ] = true;
-        reserveTokens.push( _DAI );
-
-        isReserveToken[ _Frax] = true;
-        reserveTokens.push( _Frax );
-
-       isLiquidityToken[_BABELDAI] = true;
-       liquidityTokens.push(_BABELDAI);
 
         blocksNeededForQueue = _blocksNeededForQueue;
     }

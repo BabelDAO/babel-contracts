@@ -634,7 +634,7 @@ interface AggregatorV3Interface {
     );
 }
 
-contract BabelBondDepository is Ownable {
+contract BabelNstLpBondDepository is Ownable {
 
     using FixedPoint for *;
     using SafeERC20 for IERC20;

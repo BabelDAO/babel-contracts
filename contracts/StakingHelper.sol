@@ -79,7 +79,7 @@ interface IStaking {
     function claim( address _recipient ) external;
 }
 
-contract StakingHelper {
+contract BabelStakingHelper {
 
     address public immutable staking;
     address public immutable BABEL;
