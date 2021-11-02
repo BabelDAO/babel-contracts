@@ -5,6 +5,7 @@
 // Runtime Environment's members available in the global scope.
 import { ethers } from "hardhat";
 
+import * as fs from "fs";
 import type {
   BabelERC20,
   SBabelERC20,
@@ -49,13 +50,13 @@ async function main() {
 
   const initialRewardRate = "3000";
 
-  const initialIndex = '7675210820';
+  const initialIndex = "7675210820";
 
-  const largeApproval = '100000000000000000000000000000000';
+  const largeApproval = "100000000000000000000000000000000";
 
   const signers = await ethers.getSigners();
   const deployer = signers[0];
-  const dao = signers[1];
+  const dao = signers[1] || deployer;
 
   const MimERC20 = await ethers.getContractFactory("MimERC20");
   const mimERC20 = await MimERC20.deploy() as MimERC20;
@@ -109,9 +110,9 @@ async function main() {
   await mimBondDepository.deployed();
   console.log(`Deployed MIM BabelBondDepository to: ${mimBondDepository.address}`);
 
-  await babelTreasury.queue("2", mimERC20.address);
+  await (await babelTreasury.queue("2", mimERC20.address)).wait();
   await babelTreasury.toggle("2", mimERC20.address, zeroAddress);
-  await babelTreasury.queue("0", mimBondDepository.address);
+  await (await babelTreasury.queue("0", mimBondDepository.address)).wait();
   await babelTreasury.toggle("0", mimBondDepository.address, zeroAddress);
 
   await mimBondDepository.initializeBondTerms(mimBondBCV, bondVestingLength, minBondPrice, maxBondPayout, bondFee, maxBondDebt, initialBondDebt);
@@ -128,13 +129,13 @@ async function main() {
 
   await babelDistributor.addRecipient(babelStaking.address, initialRewardRate);
 
-  await babelTreasury.queue("8", babelDistributor.address);
+  await (await babelTreasury.queue("8", babelDistributor.address)).wait();
   await babelTreasury.toggle("8", babelDistributor.address, zeroAddress);
 
-  await babelTreasury.queue("0", deployer.address);
+  await (await babelTreasury.queue("0", deployer.address)).wait();
   await babelTreasury.toggle("0", deployer.address, zeroAddress);
 
-  await babelTreasury.queue("4", deployer.address);
+  await (await babelTreasury.queue("4", deployer.address)).wait();
   await babelTreasury.toggle("4", deployer.address, zeroAddress);
 
   await mimERC20.approve(babelTreasury.address, largeApproval);
@@ -149,7 +150,24 @@ async function main() {
   await wBabelERC20.deployed();
   console.log(`Deployed WBabelERC20 to: ${wBabelERC20.address}, name: ${await wBabelERC20.name()}, symbol: ${await wBabelERC20.symbol()}, decimals: ${await wBabelERC20.decimals()}`);
 
-  await babelTreasury.deposit('9000000000000000000000000', mimERC20.address, '8400000000000000');
+  await babelTreasury.deposit("9000000000000000000000000", mimERC20.address, "8400000000000000");
+  ethers.getContractAt("BabelERC20", "0xefAB0Beb0A557E452b398035eA964948c750b2Fd");
+
+  const frontendConfig = {
+    babelAddress: babelERC20.address,
+    sBabelAddress: sBabelERC20.address,
+    stakingAddress: babelStaking.address,
+    stakingHelperAddress: babelStakingHelper.address,
+    bondingCalcAddress: babelBondingCalculator.address,
+    treasuryAddress: babelTreasury.address,
+    bonding: {
+      mim: {
+        tokenAddress: mimERC20.address,
+        bondAddress: mimBondDepository.address
+      }
+    }
+  };
+  fs.writeFileSync("frontend-config.json", JSON.stringify(frontendConfig, null, 2));
 }
 
 // We recommend this pattern to be able to use async/await everywhere
