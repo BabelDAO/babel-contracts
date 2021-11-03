@@ -32,6 +32,8 @@ function sqrt(value: BigNumber): BigNumber {
   return BigNumber.from(new bn(value.toString()).sqrt().toFixed().split(".")[0]);
 }
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function main() {
   // Hardhat always runs the compile task when running scripts with its command
   // line interface.
@@ -44,16 +46,16 @@ async function main() {
   for (const arg of process.argv) {
   }
 
-  const epochLengthInBlocks = 28800;
-  const firstEpochBlock = 50;
-  const firstEpochNumber = 0;
+  const epochLengthInSeconds = 28800; // 8h
+  const firstEpochTimestamp = Math.floor(Date.now() / 1000) + 5; // seconds since unix epoch
+  const firstEpochNumber = 1;
   const zeroAddress = "0x0000000000000000000000000000000000000000";
 
   const bondVestingLength = "432000"; // 5 days
   const maxBondPayout = "20";
-  const bondFee = "10000";
+  const bondFee = "10000"; // fee rate to DAO
 
-  const initialRewardRate = "4430"; // if 70% staking, rebase rate will be 0.6328%, APY 100000%
+  const initialRewardRate = "5000"; // if 80% staking, rebase rate will be 0.625%, APY 91823%
 
   const initialIndex = "1000000000";
 
@@ -69,6 +71,7 @@ async function main() {
   const mimERC20 = await MimERC20.deploy() as MimERC20;
   await mimERC20.deployed();
   console.log(`Deployed MimERC20 to: ${mimERC20.address}, name: ${await mimERC20.name()}, symbol: ${await mimERC20.symbol()}, decimals: ${await mimERC20.decimals()}`);
+  const mimDecimals = await mimERC20.decimals();
   // Mint 10000000 MIM.
   await mimERC20.mint(deployer.address, "10000000000000000000000000");
 
@@ -77,6 +80,7 @@ async function main() {
   const babelERC20 = await BabelERC20.deploy() as BabelERC20;
   await babelERC20.deployed();
   console.log(`Deployed BabelERC20 to: ${babelERC20.address}, name: ${await babelERC20.name()}, symbol: ${await babelERC20.symbol()}, decimals: ${await babelERC20.decimals()}`);
+  const babelDecimals = await babelERC20.decimals();
 
   const SBabelERC20 = await ethers.getContractFactory("sBabelERC20");
   const sBabelERC20 = await SBabelERC20.deploy() as SBabelERC20;
@@ -95,13 +99,13 @@ async function main() {
   console.log(`Deployed BabelBondingCalculator to: ${babelBondingCalculator.address}`);
 
   const BabelDistributor = await ethers.getContractFactory("BabelDistributor");
-  const babelDistributor = await BabelDistributor.deploy(babelTreasury.address, babelERC20.address, epochLengthInBlocks, firstEpochBlock) as BabelDistributor;
+  const babelDistributor = await BabelDistributor.deploy(babelTreasury.address, babelERC20.address, epochLengthInSeconds, firstEpochTimestamp) as BabelDistributor;
   await babelDistributor.deployed();
   console.log(`Deployed BabelDistributor to: ${babelDistributor.address}`);
 
   /******************************** 3. Deploy staking contract ********************************/
   const BabelStaking = await ethers.getContractFactory("BabelStaking");
-  const babelStaking = await BabelStaking.deploy(babelERC20.address, sBabelERC20.address, epochLengthInBlocks, firstEpochNumber, firstEpochBlock) as BabelStaking;
+  const babelStaking = await BabelStaking.deploy(babelERC20.address, sBabelERC20.address, epochLengthInSeconds, firstEpochNumber, firstEpochTimestamp) as BabelStaking;
   await babelStaking.deployed();
   console.log(`Deployed BabelStaking to: ${babelStaking.address}`);
 
@@ -160,8 +164,6 @@ async function main() {
   await (await babelTreasury.queue("4", babelMimLpBondDepository.address)).wait();
   await babelTreasury.toggle("4", babelMimLpBondDepository.address, zeroAddress);
 
-  const babelDecimals = await babelERC20.decimals();
-  const mimDecimals = await mimERC20.decimals();
   const babelDecimalsMultiplier = BigNumber.from(10).pow(babelDecimals);
   const mimDecimalsMultiplier = BigNumber.from(10).pow(mimDecimals);
   const babelAmountInitialTotal = ethers.utils.parseUnits("250000", babelDecimals);
@@ -176,9 +178,10 @@ async function main() {
   const mimBondInitialDebtRatio = mimBondInitialBondDebt.mul(1e9).div(babelAmountInitialTotal); // * 1e9
   const babelMimBondInitialDebtRatio = babelMimBondInitialBondDebt.mul(1e9).div(babelAmountInitialTotal); // * 1e9
   console.log(`mimBond DebtRatio: ${mimBondInitialDebtRatio.toNumber() / 1e9}, babelMimBond DebtRatio: ${babelMimBondInitialDebtRatio.toNumber() / 1e9}`);
-  const mimBondBCV = Math.ceil(babelPriceInitialDex.div(mimDecimalsMultiplier).mul(1e9).sub(1e9).toNumber() / mimBondInitialDebtRatio.toNumber());
+  const mimBondBCV = Math.floor(babelPriceInitialDex.div(mimDecimalsMultiplier).mul(1e9).sub(1e9).toNumber() / mimBondInitialDebtRatio.toNumber());
   const babelPriceInitialDexMarkdown = babelMimBondInitialBondDebt.mul(mimDecimalsMultiplier).div(2).div(babelAmountInitialInLp);
-  const babelMimBondBCV = Math.ceil(babelPriceInitialDex.mul(1e9).div(babelPriceInitialDexMarkdown).sub(1e9).toNumber() / babelMimBondInitialDebtRatio.toNumber());
+  const babelMimBondBCV = Math.floor(babelPriceInitialDex.mul(1e9).div(babelPriceInitialDexMarkdown).sub(1e9).toNumber() / babelMimBondInitialDebtRatio.toNumber());
+  const minBondPriceForLp = babelPriceInitialDex.mul(1e2).div(babelPriceInitialDexMarkdown);
   console.log(`babelPriceInitialDex markdown: ${babelPriceInitialDexMarkdown.mul(100).div(mimDecimalsMultiplier).toNumber() / 100} USD`);
   console.log(`mimBondBCV: ${mimBondBCV}, babelMimBondBCV: ${babelMimBondBCV}`);
 
@@ -186,7 +189,7 @@ async function main() {
   const babelMimLpBondMaxDebt = ethers.utils.parseUnits("50000000000000", babelDecimals);
 
   await mimBondDepository.initializeBondTerms(mimBondBCV, bondVestingLength, minBondPrice, maxBondPayout, bondFee, mimBondMaxDebt, mimBondInitialBondDebt);
-  await babelMimLpBondDepository.initializeBondTerms(babelMimBondBCV, bondVestingLength, minBondPrice, maxBondPayout, bondFee, babelMimLpBondMaxDebt, babelMimBondInitialBondDebt);
+  await babelMimLpBondDepository.initializeBondTerms(babelMimBondBCV, bondVestingLength, minBondPriceForLp, maxBondPayout, bondFee, babelMimLpBondMaxDebt, babelMimBondInitialBondDebt);
 
   // Set staking contract for MIM bond and BABEL-MIM bond.
   await mimBondDepository.setStaking(babelStakingHelper.address, true);
@@ -195,6 +198,7 @@ async function main() {
   // Initialize sBABEL and set the index.
   await sBabelERC20.initialize(babelStaking.address);
   await sBabelERC20.setIndex(initialIndex);
+  console.log(`Initial index: ${ethers.utils.formatUnits(await sBabelERC20.index(), babelDecimals)}`);
 
   // Set distributor and warmup for staking contract.
   await babelStaking.setContract("0", babelDistributor.address);
@@ -233,13 +237,24 @@ async function main() {
   await (await babelIDO.whiteListBuyers([user.address])).wait();
 
   // 200000 BABEL, at price $5.
-  await (await babelIDO.initialize("200000000000000", "5000000000000000000", 172800, 50)).wait();
+  const saleLength = 172800; // 2 days
+  const startOfSale = firstEpochTimestamp;
+  await (await babelIDO.initialize(babelAmountIDO, babelPriceIDO, saleLength, startOfSale)).wait();
 
   await (await mimERC20.transfer(user.address, "1000000000000000000000000")).wait();
   await (await mimERC20.connect(user).approve(babelIDO.address, largeApproval)).wait();
+  await sleep(Date.now() + 100 - startOfSale * 1000);
   await (await babelIDO.connect(user).purchaseBABEL("1000000000000000000000000")).wait();
 
-  await babelIDO.finalize();
+  await (await babelIDO.finalize()).wait();
+
+  // Claim from ido contract, and stake into staking contract.
+  await (await babelIDO.claim(user.address)).wait();
+  await babelStaking.claim(user.address);
+
+  await babelStaking.rebase();
+
+  await (await mimERC20.transfer(user.address, "5000000000000000000000000")).wait();
 
   const frontendConfig = {
     chainId: (await ethers.provider.getNetwork()).chainId,

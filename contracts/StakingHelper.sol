@@ -91,10 +91,10 @@ contract BabelStakingHelper {
         BABEL = _BABEL;
     }
 
-    function stake( uint _amount ) external {
-        IERC20(BABEL).transferFrom( msg.sender, address(this), _amount );
-        IERC20(BABEL).approve( staking, _amount );
-        IStaking( staking ).stake( _amount, msg.sender );
-        IStaking( staking ).claim( msg.sender );
+    function stake( uint _amount, address recipient ) external {
+        IERC20( BABEL ).transferFrom( msg.sender, address(this), _amount );
+        IERC20( BABEL ).approve( staking, _amount );
+        IStaking( staking ).stake( _amount, recipient );
+        IStaking( staking ).claim( recipient );
     }
 }

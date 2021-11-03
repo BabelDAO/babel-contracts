@@ -673,7 +673,7 @@ contract BabelNstLpBondDepository is Ownable {
     mapping( address => Bond ) public bondInfo; // stores bond information for depositors
 
     uint public totalDebt; // total value of outstanding bonds; used for pricing
-    uint public lastDecay; // reference block for debt decay
+    uint public lastDecay; // reference seconds for debt decay
 
 
 
@@ -683,7 +683,7 @@ contract BabelNstLpBondDepository is Ownable {
     // Info for creating new bonds
     struct Terms {
         uint controlVariable; // scaling variable for price
-        uint vestingTerm; // in blocks
+        uint vestingTerm; // in seconds
         uint minimumPrice; // vs principle value
         uint maxPayout; // in thousandths of a %. i.e. 500 = 0.5%
         uint maxDebt; // 9 decimal debt ratio, max % total supply created as debt
@@ -692,8 +692,8 @@ contract BabelNstLpBondDepository is Ownable {
     // Info for bond holder
     struct Bond {
         uint payout; // BABEL remaining to be paid
-        uint vesting; // Blocks left to vest
-        uint lastBlock; // Last interaction
+        uint vesting; // Seconds left to vest
+        uint lastTime; // Last interaction
         uint pricePaid; // In DAI, for front end viewing
     }
 
@@ -702,8 +702,8 @@ contract BabelNstLpBondDepository is Ownable {
         bool add; // addition or subtraction
         uint rate; // increment
         uint target; // BCV when adjustment finished
-        uint buffer; // minimum length (in blocks) between adjustments
-        uint lastBlock; // block when last adjustment made
+        uint buffer; // minimum length (in seconds) between adjustments
+        uint lastTime; // timestamp when last adjustment made
     }
 
 
@@ -748,14 +748,14 @@ contract BabelNstLpBondDepository is Ownable {
     ) external onlyPolicy() {
         require( terms.controlVariable == 0, "Bonds must be initialized from 0" );
         terms = Terms ({
-        controlVariable: _controlVariable,
-        vestingTerm: _vestingTerm,
-        minimumPrice: _minimumPrice,
-        maxPayout: _maxPayout,
-        maxDebt: _maxDebt
+            controlVariable: _controlVariable,
+            vestingTerm: _vestingTerm,
+            minimumPrice: _minimumPrice,
+            maxPayout: _maxPayout,
+            maxDebt: _maxDebt
         });
         totalDebt = _initialDebt;
-        lastDecay = block.number;
+        lastDecay = block.timestamp;
     }
 
 
@@ -797,11 +797,11 @@ contract BabelNstLpBondDepository is Ownable {
         require( _increment <= terms.controlVariable.mul( 25 ).div( 1000 ), "Increment too large" );
 
         adjustment = Adjust({
-        add: _addition,
-        rate: _increment,
-        target: _target,
-        buffer: _buffer,
-        lastBlock: block.number
+            add: _addition,
+            rate: _increment,
+            target: _target,
+            buffer: _buffer,
+            lastTime: block.timestamp
         });
     }
 
@@ -866,14 +866,14 @@ contract BabelNstLpBondDepository is Ownable {
 
         // depositor info is stored
         bondInfo[ _depositor ] = Bond({
-        payout: bondInfo[ _depositor ].payout.add( payout ),
-        vesting: terms.vestingTerm,
-        lastBlock: block.number,
-        pricePaid: priceInUSD
+            payout: bondInfo[ _depositor ].payout.add( payout ),
+            vesting: terms.vestingTerm,
+            lastTime: block.timestamp,
+            pricePaid: priceInUSD
         });
 
         // indexed events are emitted
-        emit BondCreated( _amount, payout, block.number.add( terms.vestingTerm ), priceInUSD );
+        emit BondCreated( _amount, payout, block.timestamp.add( terms.vestingTerm ), priceInUSD );
         emit BondPriceChanged( bondPriceInUSD(), _bondPrice(), debtRatio() );
 
         adjust(); // control variable is adjusted
@@ -888,7 +888,7 @@ contract BabelNstLpBondDepository is Ownable {
      */
     function redeem( address _recipient, bool _stake ) external returns ( uint ) {
         Bond memory info = bondInfo[ _recipient ];
-        uint percentVested = percentVestedFor( _recipient ); // (blocks since last interaction / vesting term remaining)
+        uint percentVested = percentVestedFor( _recipient ); // (seconds since last interaction / vesting term remaining)
 
         if ( percentVested >= 10000 ) { // if fully vested
             delete bondInfo[ _recipient ]; // delete user info
@@ -901,10 +901,10 @@ contract BabelNstLpBondDepository is Ownable {
 
             // store updated deposit info
             bondInfo[ _recipient ] = Bond({
-            payout: info.payout.sub( payout ),
-            vesting: info.vesting.sub( block.number.sub( info.lastBlock ) ),
-            lastBlock: block.number,
-            pricePaid: info.pricePaid
+                payout: info.payout.sub( payout ),
+                vesting: info.vesting.sub( block.timestamp.sub( info.lastTime) ),
+                lastTime: block.timestamp,
+                pricePaid: info.pricePaid
             });
 
             emit BondRedeemed( _recipient, payout, bondInfo[ _recipient ].payout );
@@ -942,8 +942,8 @@ contract BabelNstLpBondDepository is Ownable {
      *  @notice makes incremental adjustment to control variable
      */
     function adjust() internal {
-        uint blockCanAdjust = adjustment.lastBlock.add( adjustment.buffer );
-        if( adjustment.rate != 0 && block.number >= blockCanAdjust ) {
+        uint timeCanAdjust = adjustment.lastTime.add( adjustment.buffer );
+        if( adjustment.rate != 0 && block.timestamp >= timeCanAdjust) {
             uint initial = terms.controlVariable;
             if ( adjustment.add ) {
                 terms.controlVariable = terms.controlVariable.add( adjustment.rate );
@@ -956,7 +956,7 @@ contract BabelNstLpBondDepository is Ownable {
                     adjustment.rate = 0;
                 }
             }
-            adjustment.lastBlock = block.number;
+            adjustment.lastTime = block.timestamp;
             emit ControlVariableAdjustment( initial, terms.controlVariable, adjustment.rate, adjustment.add );
         }
     }
@@ -966,7 +966,7 @@ contract BabelNstLpBondDepository is Ownable {
      */
     function decayDebt() internal {
         totalDebt = totalDebt.sub( debtDecay() );
-        lastDecay = block.number;
+        lastDecay = block.timestamp;
     }
 
 
@@ -1067,8 +1067,8 @@ contract BabelNstLpBondDepository is Ownable {
      *  @return decay_ uint
      */
     function debtDecay() public view returns ( uint decay_ ) {
-        uint blocksSinceLast = block.number.sub( lastDecay );
-        decay_ = totalDebt.mul( blocksSinceLast ).div( terms.vestingTerm );
+        uint secondsSinceLast = block.timestamp.sub( lastDecay );
+        decay_ = totalDebt.mul(secondsSinceLast).div( terms.vestingTerm );
         if ( decay_ > totalDebt ) {
             decay_ = totalDebt;
         }
@@ -1082,11 +1082,11 @@ contract BabelNstLpBondDepository is Ownable {
      */
     function percentVestedFor( address _depositor ) public view returns ( uint percentVested_ ) {
         Bond memory bond = bondInfo[ _depositor ];
-        uint blocksSinceLast = block.number.sub( bond.lastBlock );
+        uint secondsSinceLast = block.timestamp.sub( bond.lastTime);
         uint vesting = bond.vesting;
 
         if ( vesting > 0 ) {
-            percentVested_ = blocksSinceLast.mul( 10000 ).div( vesting );
+            percentVested_ = secondsSinceLast.mul( 10000 ).div( vesting );
         } else {
             percentVested_ = 0;
         }

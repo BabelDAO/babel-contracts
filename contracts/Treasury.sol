@@ -219,7 +219,7 @@ contract BabelTreasury is Ownable {
     enum MANAGING { RESERVEDEPOSITOR, RESERVESPENDER, RESERVETOKEN, RESERVEMANAGER, LIQUIDITYDEPOSITOR, LIQUIDITYTOKEN, LIQUIDITYMANAGER, DEBTOR, REWARDMANAGER, SBABEL}
 
     address public immutable BABEL;
-    uint public immutable blocksNeededForQueue;
+    uint public immutable secondsNeededForQueue;
 
     address[] public reserveTokens; // Push only, beware false-positives.
     mapping( address => bool ) public isReserveToken;
@@ -268,12 +268,12 @@ contract BabelTreasury is Ownable {
 
     constructor (
         address _BABEL,
-        uint _blocksNeededForQueue
+        uint _secondsNeededForQueue
     ) {
         require( _BABEL != address(0) );
         BABEL = _BABEL;
 
-        blocksNeededForQueue = _blocksNeededForQueue;
+        secondsNeededForQueue = _secondsNeededForQueue;
     }
 
     /**
@@ -474,25 +474,25 @@ contract BabelTreasury is Ownable {
     function queue( MANAGING _managing, address _address ) external onlyManager() returns ( bool ) {
         require( _address != address(0) );
         if ( _managing == MANAGING.RESERVEDEPOSITOR ) { // 0
-            reserveDepositorQueue[ _address ] = block.number.add( blocksNeededForQueue );
+            reserveDepositorQueue[ _address ] = block.timestamp.add(secondsNeededForQueue);
         } else if ( _managing == MANAGING.RESERVESPENDER ) { // 1
-            reserveSpenderQueue[ _address ] = block.number.add( blocksNeededForQueue );
+            reserveSpenderQueue[ _address ] = block.timestamp.add(secondsNeededForQueue);
         } else if ( _managing == MANAGING.RESERVETOKEN ) { // 2
-            reserveTokenQueue[ _address ] = block.number.add( blocksNeededForQueue );
+            reserveTokenQueue[ _address ] = block.timestamp.add(secondsNeededForQueue);
         } else if ( _managing == MANAGING.RESERVEMANAGER ) { // 3
-            ReserveManagerQueue[ _address ] = block.number.add( blocksNeededForQueue.mul( 2 ) );
+            ReserveManagerQueue[ _address ] = block.timestamp.add( secondsNeededForQueue.mul( 2 ) );
         } else if ( _managing == MANAGING.LIQUIDITYDEPOSITOR ) { // 4
-            LiquidityDepositorQueue[ _address ] = block.number.add( blocksNeededForQueue );
+            LiquidityDepositorQueue[ _address ] = block.timestamp.add(secondsNeededForQueue);
         } else if ( _managing == MANAGING.LIQUIDITYTOKEN ) { // 5
-            LiquidityTokenQueue[ _address ] = block.number.add( blocksNeededForQueue );
+            LiquidityTokenQueue[ _address ] = block.timestamp.add(secondsNeededForQueue);
         } else if ( _managing == MANAGING.LIQUIDITYMANAGER ) { // 6
-            LiquidityManagerQueue[ _address ] = block.number.add( blocksNeededForQueue.mul( 2 ) );
+            LiquidityManagerQueue[ _address ] = block.timestamp.add( secondsNeededForQueue.mul( 2 ) );
         } else if ( _managing == MANAGING.DEBTOR ) { // 7
-            debtorQueue[ _address ] = block.number.add( blocksNeededForQueue );
+            debtorQueue[ _address ] = block.timestamp.add(secondsNeededForQueue);
         } else if ( _managing == MANAGING.REWARDMANAGER ) { // 8
-            rewardManagerQueue[ _address ] = block.number.add( blocksNeededForQueue );
+            rewardManagerQueue[ _address ] = block.timestamp.add(secondsNeededForQueue);
         } else if ( _managing == MANAGING.SBABEL) { // 9
-            sBABELQueue = block.number.add( blocksNeededForQueue );
+            sBABELQueue = block.timestamp.add(secondsNeededForQueue);
         } else return false;
 
         emit ChangeQueued( _managing, _address );
@@ -627,7 +627,7 @@ contract BabelTreasury is Ownable {
     ) internal view returns ( bool ) {
         if ( !status_[ _address ] ) {
             require( queue_[ _address ] != 0, "Must queue" );
-            require( queue_[ _address ] <= block.number, "Queue not expired" );
+            require( queue_[ _address ] <= block.timestamp, "Queue not expired" );
             return true;
         } return false;
     }

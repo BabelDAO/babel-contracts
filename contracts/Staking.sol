@@ -548,7 +548,7 @@ contract BabelStaking is Ownable {
     struct Epoch {
         uint length;
         uint number;
-        uint endBlock;
+        uint endTime;
         uint distribute;
     }
     Epoch public epoch;
@@ -566,7 +566,7 @@ contract BabelStaking is Ownable {
         address _sBABEL,
         uint _epochLength,
         uint _firstEpochNumber,
-        uint _firstEpochBlock
+        uint _firstEpochTime
     ) {
         require( _BABEL != address(0) );
         BABEL = _BABEL;
@@ -576,7 +576,7 @@ contract BabelStaking is Ownable {
         epoch = Epoch({
             length: _epochLength,
             number: _firstEpochNumber,
-            endBlock: _firstEpochBlock,
+            endTime: _firstEpochTime,
             distribute: 0
         });
     }
@@ -668,11 +668,11 @@ contract BabelStaking is Ownable {
         @notice trigger rebase if epoch over
      */
     function rebase() public {
-        if( epoch.endBlock <= block.number ) {
+        if( epoch.endTime <= block.timestamp ) {
 
             IsBABEL(sBABEL).rebase( epoch.distribute, epoch.number );
 
-            epoch.endBlock = epoch.endBlock.add( epoch.length );
+            epoch.endTime = epoch.endTime.add( epoch.length );
             epoch.number++;
 
             if ( distributor != address(0) ) {
