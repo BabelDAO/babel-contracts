@@ -22,6 +22,10 @@ interface IWBabelERC20 {
     function staking() external view returns (address);
 
     function wrapFromsBABEL(uint _amount) external returns (uint);
+
+    function unwrapToBABEL(uint _amount) external returns (uint);
+
+    function sBABELValue(uint _amount) external view returns (uint);
 }
 
 interface IStaking {
@@ -50,7 +54,7 @@ interface IStakingHelper {
 interface IBondDepository {
     function principle() external view returns (address);
 
-    function bondInfo(address _depositor) external returns (
+    function bondInfo(address _depositor) external view returns (
         uint payout,
         uint vesting,
         uint lastTime,
@@ -97,7 +101,7 @@ interface IUniswapV2Pair is IERC20 {
     function mint(address to) external returns (uint liquidity);
 }
 
-contract BondingArbitrage is Pausable {
+contract BondingArbitrage is Ownable, Pausable {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -121,12 +125,16 @@ contract BondingArbitrage is Pausable {
     address public currentDepositor;
 
     address[] public stakers;
-    mapping(address => uint256) public sTokenAmounts;
-    uint256 public totalAmount;
+    mapping(address => uint256) public stakerShares;
+    uint256 public totalShares;
 
-    address[] public newStakers;
-    mapping(address => uint256) public newWsTokenAmounts;
-    uint256 public newTotalAmount;
+    bool addLocked;
+    address[] public addStakers;
+    mapping(address => uint256) public addWstAmounts;
+    uint256 public addTotalWstAmount;
+    uint256 public addShares;
+
+    uint256 profitFee; // * 1e4
 
     constructor (
         address _token,
@@ -147,12 +155,12 @@ contract BondingArbitrage is Pausable {
         stakingHelper = _stakingHelper;
     }
 
-    function setUsdPair(address _usdPair) external {
+    function setUsdPair(address _usdPair) public onlyOwner {
         require(IUniswapV2Pair(_usdPair).token0() == token || IUniswapV2Pair(_usdPair).token1() == token);
         usdPair = _usdPair;
     }
 
-    function setRouter(address _router, NATIVE_TOKEN _nativeToken) external {
+    function setRouter(address _router, NATIVE_TOKEN _nativeToken) public onlyOwner {
         nativeToken = _nativeToken;
         if (_nativeToken == NATIVE_TOKEN.WETH) {
             wNativeToken = IUniswapV2Router(_router).WETH();
@@ -164,7 +172,7 @@ contract BondingArbitrage is Pausable {
         router = _router;
     }
 
-    function addDepositor(address depositor, bool isLiquidity) external {
+    function addDepositor(address depositor, bool isLiquidity) public onlyOwner {
         if (isLiquidity) {
             require(!isLiquidityDepositor[depositor]);
             address lpPair = IBondDepository(depositor).principle();
@@ -182,8 +190,8 @@ contract BondingArbitrage is Pausable {
         }
     }
 
-    function deposit(uint256 amount) external {
-        IERC20(token).transferFrom(msg.sender, address(this), amount);
+    function deposit(uint256 amount) public {
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
         uint256 sTokenBalance = IERC20(sToken).balanceOf(address(this));
 
@@ -196,7 +204,7 @@ contract BondingArbitrage is Pausable {
         _depositS(msg.sender, IERC20(sToken).balanceOf(address(this)).sub(sTokenBalance));
     }
 
-    function depositS(uint256 amount) external {
+    function depositS(uint256 amount) public {
         IERC20(sToken).safeTransferFrom(msg.sender, address(this), amount);
 
         _depositS(msg.sender, amount);
@@ -208,19 +216,26 @@ contract BondingArbitrage is Pausable {
         IERC20(sToken).approve(address(this), amount);
         IWBabelERC20(wsToken).wrapFromsBABEL(amount);
 
-        uint256 wsTokenDelta = IERC20(wsToken).balanceOf(address(this)).sub(wsTokenBalance);
-        newStakers.push(recipient);
-        newWsTokenAmounts[recipient] = newWsTokenAmounts[recipient] + wsTokenDelta;
+        uint256 wsAmount = IERC20(wsToken).balanceOf(address(this)).sub(wsTokenBalance);
+        _depositWS(recipient, wsAmount);
     }
 
-    function depositWS(uint256 amount) external {
+    function depositWS(uint256 amount) public {
         IERC20(wsToken).safeTransferFrom(msg.sender, address(this), amount);
 
-        newStakers.push(msg.sender);
-        newWsTokenAmounts[msg.sender] = newWsTokenAmounts[msg.sender] + amount;
+        _depositWS(msg.sender, amount);
     }
 
-    function restake(address _depositor) external {
+    function _depositWS(address recipient, uint256 amount) internal {
+        require(!addLocked, "cannot deposit now");
+        addStakers.push(recipient);
+        addWstAmounts[recipient] = addWstAmounts[recipient] + amount;
+        addTotalWstAmount = addTotalWstAmount.add(amount);
+    }
+
+    function restake(address _depositor) public {
+        require(!addLocked);
+
         bool isLiquidity = isLiquidityDepositor[_depositor];
         if (!isLiquidity) {
             require(isReserveDepositor[_depositor], "invalid depositor");
@@ -229,6 +244,7 @@ contract BondingArbitrage is Pausable {
         uint256 fiveDayRate;
 
         {
+            // for simplicity, do not allow override existing pending bond
             (uint256 pendingPayout, , ,) = IBondDepository(currentDepositor).bondInfo(address(this));
             require(pendingPayout == 0, "pending bonding payout");
 
@@ -254,6 +270,14 @@ contract BondingArbitrage is Pausable {
 
         uint256 amount = IERC20(sToken).balanceOf(address(this));
         IStaking(staking).unstake(amount, true);
+
+        uint256 addAmount = IWBabelERC20(wsToken).unwrapToBABEL(addTotalWstAmount);
+
+        addShares = totalShares.mul(addAmount).div(amount);
+        totalShares = totalShares.add(addShares);
+        addLocked = true;
+
+        amount = amount.add(addAmount);
 
         uint256 payout;
         if (isLiquidity) {
@@ -330,10 +354,98 @@ contract BondingArbitrage is Pausable {
         require(combinationAmount >= stakingAmount.add(amount.mul(100 - 10)), "combination of bonding and staking not profitable");
     }
 
-    function redeemAndStake() external {
+    function regulateShares(uint256 limit) public {
+        require(addLocked);
+
+        uint256 length = addStakers.length;
+        if (limit > length) {
+            limit = length;
+        }
+
+        for (uint256 i = length - 1; i >= length - limit; i--) {
+            address staker = addStakers[i];
+            uint256 share = addShares.mul(addWstAmounts[staker]).div(addTotalWstAmount);
+            stakerShares[staker] = stakerShares[staker].add(share);
+
+            addStakers.pop();
+            // delete last element
+            delete addWstAmounts[staker];
+        }
+
+        if (addStakers.length == 0) {
+            addLocked = false;
+            addTotalWstAmount = 0;
+            addShares = 0;
+        }
+    }
+
+    function shareOf(address staker) public view returns (uint256){
+        uint256 share = stakerShares[staker];
+        if (addLocked && addTotalWstAmount > 0) {
+            share = share.add(addShares.mul(addWstAmounts[staker]).div(addTotalWstAmount));
+        }
+        return share;
+    }
+
+    function stakedAmountOf(address staker) public view returns (uint256) {
+        if (totalShares == 0) {
+            return 0;
+        }
+        uint256 total = IERC20(sToken).balanceOf(staker);
+        uint256 share = shareOf(staker);
+        return total.mul(share).div(totalShares);
+    }
+
+    function pendingBondAmountOf(address staker) public view returns (uint256) {
+        if (totalShares == 0 || currentDepositor == address(0)) {
+            return 0;
+        }
+        (uint256 pendingPayout, , ,) = IBondDepository(currentDepositor).bondInfo(address(this));
+        uint256 share = shareOf(staker);
+        return pendingPayout.mul(share).div(totalShares);
+    }
+
+    function pendingAddedAmountOf(address staker) public view returns (uint256) {
+        if (addLocked) {
+            return 0;
+        }
+        return IWBabelERC20(wsToken).sBABELValue(addWstAmounts[staker]);
+    }
+
+    function withdrawStaked(uint256 amount) public {
+        uint256 stakedAmount = stakedAmountOf(msg.sender);
+        require(amount > 0 && amount <= stakedAmount);
+
+        uint256 share = stakerShares[msg.sender].mul(amount).div(stakedAmount);
+        stakerShares[msg.sender] = stakerShares[msg.sender].sub(share);
+        totalShares = totalShares.sub(share);
+
+        IStaking(staking).unstake(amount, true);
+        IERC20(token).safeTransfer(msg.sender, amount);
+    }
+
+    function withdrawPendingAdded(uint256 amount) public {
+        uint256 pendingAdded = pendingAddedAmountOf(msg.sender);
+        require(amount > 0 && amount <= pendingAdded);
+
+        uint256 wsAmount = addWstAmounts[msg.sender].mul(amount).div(pendingAdded);
+        addWstAmounts[msg.sender] = addWstAmounts[msg.sender].sub(wsAmount);
+        addTotalWstAmount = addTotalWstAmount.sub(wsAmount);
+
+        IWBabelERC20(wsToken).unwrapToBABEL(wsAmount);
+        IERC20(token).safeTransfer(msg.sender, amount);
+    }
+
+    function redeemAndStake() public {
         uint256 payout = IBondDepository(currentDepositor).redeem(address(this), true);
         uint256 total = IERC20(sToken).balanceOf(address(this));
         console.log("redeem and stake amount: %s, total staked amount: %s", payout, total);
+    }
+
+    function manage() public onlyOwner {
+        IERC20(token).safeTransfer(owner(), IERC20(token).balanceOf(owner()));
+        IERC20(sToken).safeTransfer(owner(), IERC20(sToken).balanceOf(owner()));
+        IERC20(wsToken).safeTransfer(owner(), IERC20(wsToken).balanceOf(owner()));
     }
 
     function _priceInUSD() internal view returns (uint256) {

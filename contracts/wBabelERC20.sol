@@ -740,7 +740,7 @@ library SafeERC20 {
 interface IStaking {
     function stake( uint _amount, address _recipient ) external returns ( bool );
 
-    function unstake( uint _amount, address _recipient ) external returns ( bool );
+    function unstake( uint _amount, bool _trigger ) external returns ( bool );
 
     function index() external view returns ( uint );
 }
@@ -789,7 +789,7 @@ contract WBabelERC20 is ERC20 {
 
         uint value = sBABELValue( _amount );
         IERC20(sBABEL).approve( staking, value ); // unstake sBABEL for BABEL
-        IStaking( staking ).unstake( value, address(this) );
+        IStaking( staking ).unstake( value, false );
 
         IERC20(BABEL).transfer( msg.sender, value );
         return value;
